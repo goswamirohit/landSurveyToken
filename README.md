@@ -42,7 +42,7 @@ Handles:
 ### 📁 Installation
 
 ```bash
-git clone https://github.com/Rutmaniyar/landSurveyToken.git
+git clone https://github.com/goswamirohit/landSurveyToken.git
 cd land-registry-blockchain
 npm install
 ```
