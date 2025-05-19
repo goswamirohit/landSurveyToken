@@ -1,78 +1,99 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-import "https://github.com/OpenZeppelin/openzeppelin-contracts/blob/master/contracts/token/ERC20/IERC20.sol";
+interface IERC20 {
+    function transferFrom(address sender, address recipient, uint256 amount) external returns (bool);
+}
 
-contract LandSurveyToken is IERC20 {
-    string public name;
-    string public symbol;
-    uint8 public decimals;
-    uint256 private _totalSupply;
-    uint256 private tokenPrice;
-    mapping(address => uint256) private _balances;
-    mapping(address => mapping(address => uint256)) private _allowances;
-    address private _owner;
+/// @title Land Registry System Using ERC-20 Token
+/// @notice Manages land registration, sales, and transfers using LandSurveyToken for payments
+contract LandRegistryWithToken {
 
-    constructor(string memory _name, string memory _symbol, uint8 _decimals, uint256 _initialSupply, uint256 _tokenPrice) {
-        name = _name;
-        symbol = _symbol;
-        decimals = _decimals;
-        _totalSupply = _initialSupply * 10 ** uint256(decimals);
-        _balances[msg.sender] = _totalSupply;
-        _owner = msg.sender;
-        tokenPrice = _tokenPrice;
-        emit Transfer(address(0), msg.sender, _totalSupply);
+    address public admin;
+    IERC20 public paymentToken;
+
+    constructor(address tokenAddress) {
+        admin = msg.sender;
+        paymentToken = IERC20(tokenAddress);
     }
 
-    function totalSupply() public view override returns (uint256) {
-        return _totalSupply;
+    struct Land {
+        uint id;
+        string location;
+        uint area; // square meters
+        address owner;
+        bool forSale;
+        uint price; // in tokens
     }
 
-    function balanceOf(address account) public view override returns (uint256) {
-        return _balances[account];
+    uint public landCounter = 0;
+    mapping(uint => Land) public lands;
+
+    // Events
+    event LandRegistered(uint id, string location, uint area, address indexed owner);
+    event LandForSale(uint id, uint price);
+    event LandSold(uint id, address indexed oldOwner, address indexed newOwner, uint price);
+    event LandUpdated(uint id, string newLocation, uint newArea);
+
+    // Modifiers
+    modifier onlyAdmin() {
+        require(msg.sender == admin, "Only admin can perform this action");
+        _;
     }
 
-    function transfer(address recipient, uint256 amount) public override returns (bool) {
-        require(recipient != address(0), "ERC20: transfer to the zero address");
-        require(_balances[msg.sender] >= amount, "ERC20: transfer amount exceeds balance");
-        _balances[msg.sender] -= amount;
-        _balances[recipient] += amount;
-        emit Transfer(msg.sender, recipient, amount);
-        return true;
+    modifier onlyOwner(uint landId) {
+        require(lands[landId].owner == msg.sender, "Only land owner can perform this action");
+        _;
     }
 
-    function allowance(address owner, address spender) public view override returns (uint256) {
-        return _allowances[owner][spender];
+    /// @notice Register new land
+    function registerLand(string memory location, uint area, address owner) public onlyAdmin {
+        landCounter++;
+        lands[landCounter] = Land(landCounter, location, area, owner, false, 0);
+        emit LandRegistered(landCounter, location, area, owner);
     }
 
-    function approve(address spender, uint256 amount) public override returns (bool) {
-        _allowances[msg.sender][spender] = amount;
-        emit Approval(msg.sender, spender, amount);
-        return true;
+    /// @notice Mark land for sale with price in tokens
+    function markForSale(uint landId, uint price) public onlyOwner(landId) {
+        Land storage land = lands[landId];
+        land.forSale = true;
+        land.price = price;
+        emit LandForSale(landId, price);
     }
 
-    function transferFrom(address sender, address recipient, uint256 amount) public override returns (bool) {
-        require(recipient != address(0), "ERC20: transfer to the zero address");
-        require(_balances[sender] >= amount, "ERC20: transfer amount exceeds balance");
-        require(_allowances[sender][msg.sender] >= amount, "ERC20: transfer amount exceeds allowance");
-        _balances[sender] -= amount;
-        _balances[recipient] += amount;
-        _allowances[sender][msg.sender] -= amount;
-        emit Transfer(sender, recipient, amount);
-        return true;
+    /// @notice Buy land using LandSurveyToken
+    function buyLand(uint landId) public {
+        Land storage land = lands[landId];
+        require(land.forSale, "Land not for sale");
+
+        address seller = land.owner;
+        require(seller != msg.sender, "Cannot buy your own land");
+
+        uint price = land.price;
+
+        // Transfer tokens from buyer to seller
+        bool success = paymentToken.transferFrom(msg.sender, seller, price);
+        require(success, "Token transfer failed");
+
+        // Update ownership
+        land.owner = msg.sender;
+        land.forSale = false;
+        land.price = 0;
+
+        emit LandSold(landId, seller, msg.sender, price);
     }
 
-    function buyTokens(uint256 tokenAmount) public payable {
-        require(tokenAmount > 0, "Token amount must be greater than 0");
-        require(_balances[_owner] >= tokenAmount, "Not enough tokens available for sale");
-        uint256 ethAmount = tokenAmount * tokenPrice; // Calculate ETH amount based on the current token/ETH exchange rate
-        require(msg.sender.balance >= ethAmount, "Insufficient ETH balance to purchase tokens");
-        // require(msg.value >= ethAmount, "Insufficient ETH sent to purchase tokens");
-        _balances[_owner] -= tokenAmount;
-        _balances[msg.sender] += tokenAmount;
-        emit Transfer(_owner, msg.sender, tokenAmount);
-        if (msg.value > ethAmount) {
-            payable(msg.sender).transfer(msg.sender.balance - ethAmount); // Refund any excess ETH
-        }
+    /// @notice Update land metadata
+    function updateLandDetails(uint landId, string memory newLocation, uint newArea) public onlyOwner(landId) {
+        Land storage land = lands[landId];
+        land.location = newLocation;
+        land.area = newArea;
+
+        emit LandUpdated(landId, newLocation, newArea);
+    }
+
+    /// @notice Get land info
+    function getLand(uint landId) public view returns (Land memory) {
+        return lands[landId];
     }
 }
